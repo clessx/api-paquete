@@ -1,39 +1,54 @@
 from fastapi import FastAPI, UploadFile, File
-from tensorflow import keras
-from PIL import Image
+from fastapi.responses import JSONResponse
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing import image
 import numpy as np
-import io, os, requests
+import io
+from PIL import Image
+import os
 
-app = FastAPI(title="POD-ML Paquetes API", version="v1.0")
+# === Inicialización de la API ===
+app = FastAPI(title="API Clasificación Paquetes POD-ML", version="1.0")
 
-# ==== CONFIGURACIÓN DEL MODELO ====
-MODEL_PATH = "models/best_20251023-153753.keras"
+# === Cargar modelo ===
+MODEL_PATH = "models/paquete_classifier_v5_best.keras"
+model = load_model(MODEL_PATH)
 
-# Si el modelo no existe, lo descarga automáticamente (ideal para Railway)
-MODEL_URL = "https://drive.google.com/uc?export=download&id=TU_ID_DE_DRIVE"
-os.makedirs("models", exist_ok=True)
-
-if not os.path.exists(MODEL_PATH):
-    print("⬇️ Descargando modelo desde Google Drive...")
-    r = requests.get(MODEL_URL)
-    with open(MODEL_PATH, "wb") as f:
-        f.write(r.content)
-    print("✅ Modelo descargado correctamente.")
-
-print("🧠 Cargando modelo...")
-model = keras.models.load_model(MODEL_PATH)
-print("✅ Modelo cargado exitosamente.")
+# === Tamaño de imagen esperado ===
 IMG_SIZE = (224, 224)
 
+# === Endpoint raíz ===
 @app.get("/")
-def home():
-    return {"status": "API de clasificación de paquetes activa"}
+async def root():
+    return {"status": "API de clasificación activa", "model": "v5_best"}
 
+# === Endpoint de predicción ===
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    image = Image.open(io.BytesIO(await file.read())).convert("RGB")
-    image = image.resize(IMG_SIZE)
-    arr = np.expand_dims(np.array(image) / 255.0, axis=0)
-    pred = model.predict(arr)[0][0]
-    label = "valida" if pred > 0.5 else "no_valida"
-    return {"prediction": label, "confidence": float(pred)}
+    try:
+        # Leer bytes del archivo
+        contents = await file.read()
+        img = Image.open(io.BytesIO(contents)).convert("RGB")
+
+        # Redimensionar y normalizar
+        img = img.resize(IMG_SIZE)
+        img_array = np.array(img) / 255.0
+        img_array = np.expand_dims(img_array, axis=0)
+
+        # Realizar predicción
+        prediction = model.predict(img_array)[0][0]
+        clase = "valida" if prediction >= 0.5 else "no_valida"
+
+        return JSONResponse({
+            "prediction": clase,
+            "confidence": float(prediction)
+        })
+
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# === Ejecutar localmente ===
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
