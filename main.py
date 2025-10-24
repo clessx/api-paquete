@@ -11,7 +11,7 @@ import os
 app = FastAPI(title="API Clasificación Paquetes POD-ML", version="1.0")
 
 # === Cargar modelo ===
-MODEL_PATH = "models/paquete_classifier_v5_best.keras"
+MODEL_PATH = "models/paquete_classifier_v5_best_20251023-090007.keras"
 model = load_model(MODEL_PATH)
 
 # === Tamaño de imagen esperado ===
