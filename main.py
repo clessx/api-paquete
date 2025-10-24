@@ -1,80 +1,73 @@
 # -*- coding: utf-8 -*-
 """
-API Paquete - Clasificación de imágenes válidas / no válidas
-Modelo: paquete_classifier_v5_best_20251023-090007.keras
-Autor: Cristian Yáñez (CorreosChile)
+main.py — API de Clasificación de Paquetes (POD-ML)
+Versión 2 — Corrige el problema de predicciones "todo no_valida"
+Autor: Cristian Yáñez
 """
 
-import io
-import numpy as np
 from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from tensorflow.keras.models import load_model
 from tensorflow.keras.applications.efficientnet import preprocess_input
 from PIL import Image
-import uvicorn
+import numpy as np
+from io import BytesIO
 
-# ============================================================
-# ⚙️ CONFIGURACIÓN
-# ============================================================
-MODEL_PATH = r"C:\Users\Gosu Station\Desktop\POD-ML-Paquetes\models\paquete_classifier_v5_best_20251023-090007.keras"
+# === CONFIGURACIÓN ===
+MODEL_PATH = "models/paquete_classifier_v5_best_20251023-090007.keras"
 IMG_SIZE = (224, 224)
+THRESHOLD = 0.4  # 🔧 umbral ajustado según análisis local
 
-# ============================================================
-# 🧠 CARGA DEL MODELO
-# ============================================================
-print(f"📦 Cargando modelo desde: {MODEL_PATH}")
-model = load_model(MODEL_PATH)
-print("✅ Modelo cargado correctamente y listo para servir.")
+# === INICIALIZACIÓN DE API ===
+app = FastAPI(title="POD-ML Paquete Classifier API", version="2.0")
 
-# ============================================================
-# 🚀 API FASTAPI
-# ============================================================
-app = FastAPI(
-    title="API Clasificación de Paquetes - CorreosChile",
-    description="Servicio que clasifica imágenes como 'válida' o 'no válida' usando modelo v5_best",
-    version="1.0.0"
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # puedes limitarlo a tus dominios
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-@app.get("/")
-def home():
-    return {"message": "API de Clasificación POD funcionando correctamente."}
+# === CARGA DEL MODELO ===
+print(f"📦 Cargando modelo desde: {MODEL_PATH}")
+model = load_model(MODEL_PATH)
+print("✅ Modelo cargado correctamente.")
 
 
+# === ENDPOINT PRINCIPAL ===
 @app.post("/predict")
-async def predict_image(file: UploadFile = File(...)):
+async def predict(file: UploadFile = File(...)):
     """
-    Recibe una imagen y retorna su clasificación ('valida' o 'no_valida')
-    junto con la probabilidad estimada.
+    Recibe una imagen y devuelve la predicción de si es válida o no válida.
     """
+
     try:
-        # Leer bytes de la imagen
         contents = await file.read()
-        img = Image.open(io.BytesIO(contents)).convert("RGB")
-        img = img.resize(IMG_SIZE)
+        img = Image.open(BytesIO(contents)).convert("RGB").resize(IMG_SIZE)
+        img_array = np.array(img)
 
-        # Convertir a array y aplicar el preprocesamiento usado en el entrenamiento
-        img_array = np.expand_dims(np.array(img), axis=0)
-        img_array = preprocess_input(img_array)  # 👈 IMPORTANTE
+        # ✅ Normalización EXACTA del entrenamiento
+        img_array = preprocess_input(img_array)
+        img_array = np.expand_dims(img_array, axis=0)
 
-        # Realizar la predicción
-        prediction = model.predict(img_array)[0][0]
-        label = "valida" if prediction > 0.5 else "no_valida"
+        # === PREDICCIÓN ===
+        pred = model.predict(img_array, verbose=0)[0][0]
+        clase = "valida" if pred > THRESHOLD else "no_valida"
 
-        return JSONResponse({
-            "prediction": label,
-            "confidence": float(prediction)
-        })
+        return {
+            "prediction": clase,
+            "confidence": float(pred)
+        }
 
     except Exception as e:
-        return JSONResponse(
-            content={"error": f"Error procesando la imagen: {str(e)}"},
-            status_code=500
-        )
+        return {"error": f"❌ Error procesando la imagen: {str(e)}"}
 
 
-# ============================================================
-# 🧩 EJECUCIÓN LOCAL
-# ============================================================
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+@app.get("/")
+async def root():
+    return {
+        "message": "POD-ML Paquete Classifier API v2 está corriendo correctamente 🚀",
+        "model_path": MODEL_PATH,
+        "threshold": THRESHOLD
+    }
